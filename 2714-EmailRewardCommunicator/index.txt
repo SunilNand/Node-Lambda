@@ -1,0 +1,54 @@
+'use strict';
+var methods = require('./common.js');
+const message = require('./messages.json');
+const logMessage = require('./log-messages.json');
+const config = require('db-config');
+var emaildetailslist;
+var mysql = require('mysql');
+
+const db = String(process.env.Environment);
+const dbConfig = config[db];
+
+var con;
+
+
+
+exports.handler = async (event) => {
+ methods.writeToLog(logMessage.initialLog);
+ 
+    
+    //Main functions
+    if (typeof con === 'undefined' || con === null || con.state === 'disconnected')
+    {
+      methods.writeToLog(logMessage.newDBConnection);
+      var decrypthost=methods.decrypt(new Buffer.from(dbConfig.host, 'base64')).then(data=>{return data;});
+      var decryptuser=methods.decrypt(new Buffer.from(dbConfig.user, 'base64')).then(data=>{return data;});
+      var decryptpwd=methods.decrypt(new Buffer.from(dbConfig.password, 'base64')).then(data=>{return data;});
+      var decryptdb=methods.decrypt(new Buffer.from(dbConfig.database, 'base64')).then(data=>{return data;});
+      var decryptport=methods.decrypt(new Buffer.from(dbConfig.port, 'base64')).then(data=>{return data;});
+
+      await Promise.all([decrypthost,decryptuser,decryptpwd,decryptdb,decryptport]).then(values=> {
+        con = mysql.createConnection({
+            host: values[0].toString(),
+            user: values[1].toString(),
+            password: values[2].toString(),
+            database: values[3].toString(),
+            port: values[4].toString()
+        });
+      });
+      
+      con.connect();
+    }
+    else
+    {
+      methods.writeToLog(logMessage.connectionReused);
+    }
+  
+  var emailDetails=methods.FetchEmailDetails(con).then(results=>{return results;});
+    await Promise.all([emailDetails]).then(values=> {
+        emaildetailslist=JSON.stringify(values[0]);
+            console.log(emaildetailslist);
+        });
+        // return methods.FetchEmailDetails(con);
+  return methods.SendEmail(emaildetailslist,con);
+};

@@ -1,0 +1,254 @@
+const AWS= require('aws-sdk');
+const s3= new AWS.S3();
+const jwt= require('jsonwebtoken');
+const message= require('./messages.json');
+const logMessage= require('./log-messages.json');
+const kmsClient= new AWS.KMS();
+const source = String(process.env.Source);
+var ses= new AWS.SES();
+var IdData;
+var StatusCd;
+var successFlag=true;
+var msg;
+var Params;
+
+module.exports= {
+generatePolicy: function(customErrorMessage) {if(customErrorMessage!=null){
+const response= {
+statusCode: 403,
+body: customErrorMessage.toString(),
+                  };
+                  return response;
+                  }
+                },
+writeToLog: function(logMessage) {
+                                if(message.isLogEnabled){
+                                                console.log(logMessage);
+                                }
+                },
+displayError: function(customErrorMessage) {
+if(customErrorMessage!=null){
+const response= {
+statusCode: 500,
+body: customErrorMessage.toString(),
+                                  };
+                                  return response;
+                                  }
+                },
+decrypt:async function(buffer) {
+    
+return await new Promise((resolve, reject)=> {
+const params= {
+CiphertextBlob:buffer  
+        };
+kmsClient.decrypt(params, (err, data)=> {
+            if (err) { 
+               return reject(err);
+            } else {
+               return resolve(data.Plaintext);
+            }
+            
+        });
+    });
+},
+
+FetchEmailDetails:async function(con) 
+ {
+  return await new Promise((resolve, reject)=> {
+  const sqlQuery= 'Select Id,LoginEnterpriseID,ToList,AdditionalRecipients,Message,Status from MyTRRCEmailRequestStatus where Status = 1';
+  con.query(sqlQuery, (err, results, fields)=> {
+     if(err) 
+     {
+     this.writeToLog(logMessage.auroraDbHitFailure + ' ' + err);
+     return reject(err);
+     } 
+     else 
+     {
+     this.writeToLog(logMessage.auroraDbFetchSuccess);
+     return resolve((JSON.parse(JSON.stringify(results))));
+     }
+    });
+  });
+},
+
+SendEmail: async function(emaildetailslist,con) 
+ { 
+  if( emaildetailslist==='[]' || typeof emaildetailslist==='undefined')
+  {   
+      this.writeToLog(logMessage.noNewEmailToProcess);
+      return(logMessage.noNewEmailToProcess);
+  }
+  else
+  {
+  var data=JSON.parse(emaildetailslist);
+  for (let i= 0; i < Number(data.length); ++i) 
+   {
+    var stringAddress;
+    IdData=data[i].Id;
+    if(!data[i].AdditionalRecipients && data[i].ToList!==null)
+     stringAddress=(data[i].ToList);
+    else if(!data[i].ToList && data[i].AdditionalRecipients!==null)
+     stringAddress=data[i].AdditionalRecipients;
+    else 
+     stringAddress=(data[i].AdditionalRecipients)+','+(data[i].ToList); 
+    var RecipientList=stringAddress.split(",");
+    
+    msg=data[i].Message;
+    var chunksize=50;
+    var chunks= [];
+    RecipientList.forEach((item)=>
+    {
+      if(!chunks.length || chunks[chunks.length-1].length== chunksize)
+      chunks.push([]);
+      chunks[chunks.length-1].push(item);
+    });
+    this.UpdateStatusInDb(IdData,2,con);
+    var flagData;
+    var RcMailFlag=this.EmailTrigger(chunks,msg,con).then(results=>{return results;});
+    await Promise.all([RcMailFlag]).then(values=> 
+        {
+            flagData=(values[0]);
+        });
+
+    if(flagData == true)
+    {
+    this.UpdateStatusInDb(IdData,4,con);
+    const htmlData = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+      </head>
+      <body>
+        <p>This is automated email.Do not respond.</p>
+        <p>Email has been shared with all the reward communicators.</p>
+        <p>Note: Reward communicator role is to login to rewards and share the statement to the required people.
+        It must be completed within the Accenture given timeline.</p>
+        <p>What’s Next?</p>
+        <p>• Communication will happen through a broadcast with ASEs scheduled on 30th ,31st March & 1st April.
+        The invite for the webcast is attached.</p>
+        <p>• Rewards statement will be available to each eligible employee and respective Rewards communicator by April 03, 2020.
+        <p>Please reach out to your People Advisor in case you have any further queries.</p>
+        Thank you for your continued commitment to the success of your team members, and good luck with your conversations!</p>
+     </body>
+    </html>
+  `;
+    Params= {
+    Destination: {  ToAddresses:[data[i].LoginEnterpriseID] },       
+    Message: { Body: { Html: { Data:htmlData }  },
+    Subject: {Data:message.AcknowledgementMailSub} },
+    Source: source
+            };
+    
+    var emailLogin=this.EmailLoginUser(Params).then(results=>{return results;});
+    await Promise.all([emailLogin]).then(values=> 
+        {
+        var responses=JSON.stringify(values[0]);
+        console.log(responses);
+        });
+    }
+    else
+    {
+        this.UpdateStatusInDb(IdData,5,con);
+        this.InsertErrorDetailsInDb(IdData,flagData,con);
+    }
+   }
+   return message.returnSuccessMsgToRc;
+ }
+},
+
+EmailTrigger:async function(chunks,msg,con)
+{
+ const htmlBody = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+      </head>
+      <body>
+        <p>${message.EmailRCMessage}</p>
+        <p>${msg}</p>
+      </body>
+    </html>
+        `;
+ return await new Promise((resolve, reject)=> 
+ {
+  chunks.forEach((toItem)=>  {
+  var eParams= {
+    Destination: { BccAddresses:toItem  },
+    Message: {
+     Body: { Html: { Data: htmlBody }  },
+     Subject: { Data: message.EmailRCSubject }
+              },
+     Source: source
+               };
+   var email= ses.sendEmail(eParams, function(err, data) 
+    {
+        if(err)
+        {
+            successFlag=false;
+            return resolve(err);
+        }
+        else 
+        {
+            successFlag=true;
+            return resolve(successFlag);
+        }
+    });
+  });         
+ });
+},
+
+EmailLoginUser:async function(Params)
+{
+  return await new Promise((resolve, reject)=> {
+  var emailLogin= ses.sendEmail(Params, function(err, data) 
+  {
+    if(err)
+    {
+        return reject(err);
+    }
+    else 
+    {
+        return resolve(message.returnSuccessMsgToLoginUser);
+    }
+  });
+ });
+}, 
+UpdateStatusInDb: async function(IdData,StatusCd,con)
+{
+ return await new Promise((resolve, reject)=> {
+    const sqlQuery= 'update MyTRRCEmailRequestStatus set Status='+StatusCd+' where Id='+IdData;
+    con.query(sqlQuery, (err, results, fields)=> {
+        if (err)
+        {
+        this.writeToLog(logMessage.auroraDbHitFailure + ' ' + err);
+        return reject(err);
+        } else 
+        {
+        this.writeToLog(logMessage.auroraDbUpdateSuccess + 'For ' + IdData + ' as ' + StatusCd);
+        return resolve(message.returnmsgUpdate);
+        }
+     });
+   });
+},
+InsertErrorDetailsInDb: async function(IdData,ErrorMsg,con)
+{
+ return await new Promise((resolve, reject)=> {
+    const sqlQuery= 'INSERT INTO MyTRRCEmailErrorlog (EmailRequestID,ErrorCode,ErrorDescription,ErrorMessage)'+ 
+    'VALUES('+IdData+',"500","'+ErrorMsg.code+'","'+ErrorMsg.message.replace("'","")+'")';
+
+    con.query(sqlQuery, (err, results, fields)=> {
+        if (err)
+        {
+        this.writeToLog(logMessage.auroraDbHitFailure + ' ' + err);
+        return resolve(err);
+        } else 
+        {
+        this.writeToLog(logMessage.auroraDbInsertSucess);
+        return resolve(message.returnmsgUpdate);
+        }
+     });
+   });
+}
+};  
+
+  

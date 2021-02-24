@@ -1,0 +1,9 @@
+{
+    "AcknowledgementMailSub"      : "SENT: Important: Review Comp Statement",
+    "returnSuccessMsgToRc"        : "Email Triggered Succesfully",
+    "EmailRCSubject"              : "An Important Message About Compensation Statements for Your People",
+    "EmailRCMessage"              : "This is an automated email.  Please do not respond to this message. If you need assistance, you may contact Global.Total.Rewards@accenture.com",
+    "returnSuccessMsgToLoginUser" : "Mail Sent to LoginUser",    
+    "returnmsgUpdate"             : "Status Updated successfully",
+    "isLogEnabled"                : true
+ } 

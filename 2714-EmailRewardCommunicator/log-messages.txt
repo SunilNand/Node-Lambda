@@ -1,0 +1,10 @@
+{
+    "initialLog"            : "Email Process Initiated",
+    "newDBConnection"       : "New Connection Created",
+    "connectionReused"      : "Connection Reused",
+    "auroraDbFetchSuccess"  : "Data retrieved successfully from Aurora ",
+    "auroraDbUpdateSuccess" : "Data updated successfully in Aurora ",
+    "auroraDbInsertSucess"  : "Error Message Inserted successfully in Aurora",
+    "auroraDbHitFailure"    : "Aurora DB Hit Failed",
+    "noNewEmailToProcess"   : "No Data available to process email"
+} 
